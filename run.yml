@@ -1,5 +1,5 @@
 ---    
-- hosts: centos
+- hosts: ubuntu
   become: true
   roles:
-    - centos_main
+    - ubuntu_main
