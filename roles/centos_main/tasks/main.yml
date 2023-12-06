@@ -1,0 +1,79 @@
+---
+- name: Install required packages
+  yum:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - openstack-keystone
+    - httpd
+    - python3-mod_wsgi
+
+- name: Configure Keystone database access
+  lineinfile:
+    path: /etc/keystone/keystone.conf
+    regexp: "^connection ="
+    line: "connection = mysql+pymysql://keystone:KEYSTONE_DBPASS@controller/keystone"
+  vars:
+    KEYSTONE_DBPASS: "your_database_password"
+
+- name: Configure Fernet token provider
+  lineinfile:
+    path: /etc/keystone/keystone.conf
+    regexp: "^provider ="
+    line: "provider = fernet"
+
+- name: Populate the Identity service database
+  command: "su -s /bin/sh -c 'keystone-manage db_sync' keystone"
+
+- name: Initialize Fernet key repositories
+  command: "keystone-manage fernet_setup --keystone-user keystone --keystone-group keystone"
+  args:
+    creates: /etc/keystone/fernet-keys/0
+
+- name: Bootstrap the Identity service
+  command: >
+    keystone-manage bootstrap
+    --bootstrap-password ADMIN_PASS
+    --bootstrap-admin-url http://controller:5000/v3/
+    --bootstrap-internal-url http://controller:5000/v3/
+    --bootstrap-public-url http://controller:5000/v3/
+    --bootstrap-region-id RegionOne
+  vars:
+    ADMIN_PASS: "your_admin_password"
+
+- name: Configure Apache HTTP server
+  block:
+    - name: Configure ServerName option
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: "^ServerName"
+        line: "ServerName controller"
+
+    - name: Create link to wsgi-keystone.conf
+      file:
+        src: /usr/share/keystone/wsgi-keystone.conf
+        dest: /etc/httpd/conf.d/wsgi-keystone.conf
+        state: link
+  notify:
+    - Restart Apache
+
+- name: Restart Apache
+  systemd:
+    name: httpd
+    state: restarted
+
+- name: Start and enable Apache service
+  systemd:
+    name: httpd
+    state: started
+    enabled: true
+
+- name: Set environmental variables for administrative account
+  set_fact:
+    OS_USERNAME: "admin"
+    OS_PASSWORD: "your_admin_password"
+    OS_PROJECT_NAME: "admin"
+    OS_USER_DOMAIN_NAME: "Default"
+    OS_PROJECT_DOMAIN_NAME: "Default"
+    OS_AUTH_URL: "http://controller:5000/v3"
+    OS_IDENTITY_API_VERSION: "3"
